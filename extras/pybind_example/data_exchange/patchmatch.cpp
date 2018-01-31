@@ -2,42 +2,10 @@
 #include <pybind11/numpy.h>
 #include <cmath>
 #include <iostream>
+#include <cstdlib>
+#include <ctime>
 
 namespace py = pybind11;
-
-void put_zeros(py::array_t<double> a) {
-  auto r = a.mutable_unchecked<2>();
-  auto buf = a.request();
-  for (size_t idx = 0; idx < buf.shape[0]; idx++)
-    for (size_t idy = 0; idy < buf.shape [1]; idy++)
-      r(idx,idy) = 0.f;
-}
-
-py::array_t<double> convolution(py::array_t<double> image, py::array_t<double> kernel) {
-    auto bufImage = image.request(), bufKernel = kernel.request();
-
-    if (bufImage.ndim != 2 || bufKernel.ndim != 2)
-        throw std::runtime_error("Number of dimensions must be two");
-
-    auto i = image.mutable_unchecked<2>();
-    auto k = kernel.mutable_unchecked<2>();
-
-    auto result = py::array_t<double>(bufImage.shape);
-    auto bufResult = result.request();
-    auto r = result.mutable_unchecked<2>();
-
-    put_zeros(result);
-
-    // convolution
-    int h_w = int(std::floor((bufKernel.shape[0]/2)));
-    for (size_t idx = h_w; idx < bufImage.shape[0]-h_w; idx++)
-      for (size_t idy = h_w; idy < bufImage.shape[1]-h_w; idy++)
-        for (size_t id2x = 0; id2x < bufKernel.shape[0]; id2x++)
-          for (size_t id2y = 0; id2y < bufKernel.shape[1]; id2y++)
-            r(idx,idy) += i(idx-h_w+id2x,idy-h_w+id2y) * k(id2x,id2y);
-
-    return result;
-}
 
 bool is_clamped(int h, int w, int i0, int i1, int j0, int j1) {
   bool p1 =   i0 < h and i0 > 0.f;
@@ -54,9 +22,13 @@ float ssd(py::array_t<double> A, py::array_t<double> B,
   auto pA = A.mutable_unchecked<3>();
   auto bufB = B.request();
   auto pB = B.mutable_unchecked<3>();
-
+  int Bh = bufB.shape[0];
+  int Bw = bufB.shape[1];
+  int Ah = bufA.shape[0];
+  int Aw = bufA.shape[1];
   int channels = bufA.shape[2];
-  float sq_su = 0.0;
+
+  double sq_su = 0.0;
   for (size_t offx = 0; offx < w; offx++)
     for (size_t offy = 0; offy < w; offy++)
       for (size_t c = 0; c < channels; c++){
@@ -64,6 +36,7 @@ float ssd(py::array_t<double> A, py::array_t<double> B,
       }
   return sq_su;
 }
+
 
 void propagation(int i, int j, py::array_t<double> A, py::array_t<double> B,
                   py::array_t<double> nnf, int patch_size, int prop_step) {
@@ -73,7 +46,6 @@ void propagation(int i, int j, py::array_t<double> A, py::array_t<double> B,
 
     auto bufB = B.request();
     int B_h = bufB.shape[0], B_w = bufB.shape[1];
-    auto pB = B.mutable_unchecked<3>();
 
     // curr min offset
     float min_i = pnnf(i,j,0), min_j = pnnf(i,j,1), min_dist = pnnf(i,j,2);
@@ -98,7 +70,8 @@ void propagation(int i, int j, py::array_t<double> A, py::array_t<double> B,
     }
 
     // shiftedn offset on w
-    fi = pnnf(i,j+prop_step,0), fj = pnnf(i,j+prop_step,1);
+    fi = pnnf(i,j+prop_step,0);
+    fj = pnnf(i,j+prop_step,1);
     curr_dist = pnnf(i,j+prop_step,2);
 
     if (curr_dist < min_dist) {
@@ -119,39 +92,89 @@ void propagation(int i, int j, py::array_t<double> A, py::array_t<double> B,
     pnnf(i,j,1) = min_j;
     if (update) {
       int a_i = i, a_j = j;
-      int b_i = int(min_i), b_j = int(min_j);
-      pnnf(i,j,1) = ssd(A,B,a_i,a_j,b_i,b_j,patch_size);
+      int b_i = static_cast <int> (min_i);
+      int b_j = static_cast <int> (min_j);
+      pnnf(i,j,2) = ssd(A,B,a_i,a_j,b_i,b_j,patch_size);
     }
 }
 
-void iteration(py::array_t<double> A, py::array_t<double> B, py::array_t<double> nnf,
-                int patch_size, int even, int step ) {
+void random_search(int i, int j,
+                    py::array_t<double> A, py::array_t<double> B,
+                    py::array_t<double> nnf, int patch_size) {
+  auto bufnnf = nnf.request();
+  int nnf_h = bufnnf.shape[0], nnf_w = bufnnf.shape[1];
+  auto pnnf = nnf.mutable_unchecked<3>();
+  auto bufB = B.request();
+  int B_h = bufB.shape[0], B_w = bufB.shape[1];
+  float ri_t, rj_t, new_distance;
+  int w, u_i_t, u_j_t;
+
+  w = nnf_h;
+  if (nnf_h < nnf_w) w = nnf_w;
+  float v_i_0 = pnnf(i,j,0), v_j_0 = pnnf(i,j,1), curr_min_dist = pnnf(i,j,2);
+
+  while(w > 1) {
+    ri_t = (static_cast <float> (rand()) / static_cast <float> (RAND_MAX))-1.0;
+    rj_t = (static_cast <float> (rand()) / static_cast <float> (RAND_MAX))-1.0;
+
+    u_i_t = static_cast <int> (v_i_0 + floor(w*ri_t));
+    u_j_t = static_cast <int> (v_j_0 + floor(w*rj_t));
+
+    if (is_clamped(B_h,B_w, u_i_t,u_i_t+patch_size, u_j_t,u_j_t+patch_size)) {
+      new_distance = ssd(A,B,i,j,u_i_t,u_j_t,patch_size);
+      if (new_distance < curr_min_dist) {
+        curr_min_dist = new_distance;
+        pnnf(i,j,0) = u_i_t;
+        pnnf(i,j,1) = u_j_t;
+        pnnf(i,j,2) = curr_min_dist;
+      }
+    }
+    w = w/2;
+  }
+}
+
+void iteration(py::array_t<double> A, py::array_t<double> B,
+               py::array_t<double> nnf,
+               int patch_size, bool even, int step ) {
     auto bufnnf = nnf.request();
     int nnf_h = bufnnf.shape[0], nnf_w = bufnnf.shape[1];
-    if (even == 1){
+    if (even){
       //even iteration propagation: scan order (l-r,t-b)
-      int lstep = -step;
-      int inc_left_h = step, exc_right_h = nnf_h, d = 1;
+      int inc_left_h = step, exc_right_h = nnf_h;
       int inc_left_w = step, exc_right_w = nnf_w;
-      for (size_t i = inc_left_h; i < exc_right_h; i+=d)
-        for (size_t j = inc_left_w; i < exc_right_w; j+=d)
-          propagation(i,j,A,B,nnf,patch_size,lstep);
+      for (int i = inc_left_h; i < exc_right_h; i+=1) {
+        for (int j = inc_left_w; j < exc_right_w; j+=1) {
+          propagation(i,j,A,B,nnf,patch_size,-step);
           //random_search(i,j,A,B,nnf,patch_size);
+        }
+      }
     }
     else {
       //odd iteration\npropagation: inverse scan order (t-b,r-l)
-      int lstep = step;
-      int inc_left_h = (nnf_h-1)-step, exc_right_h = -1, d = -1;
+      int inc_left_h = (nnf_h-1)-step, exc_right_h = -1;
       int inc_left_w =(nnf_w-1)-step, exc_right_w = -1;
-      for (size_t i = inc_left_h; i > exc_right_h; i+=d)
-        for (size_t j = inc_left_w; i > exc_right_w; j+=d)
-          propagation(i,j,A,B,nnf,patch_size,lstep);
+      for (int i = inc_left_h; i > exc_right_h; i-=1) {
+        for (int j = inc_left_w; j > exc_right_w; j-=1) {
+          propagation(i,j,A,B,nnf,patch_size,step);
           //random_search(i,j,A,B,nnf,patch_size);
+        }
+      }
     }
 }
 
+py::array_t<double> nnf_approx(py::array_t<double> A, py::array_t<double> B,
+                py::array_t<double> nnf,
+                int patch_size, int iterations) {
+  std::srand(std::time(nullptr));
+  for (int i=0; i<iterations; i++) {
+    std::cout << "iteration: " << i+1 <<'\n';
+    iteration(A,B,nnf,patch_size,(i+1)%2==0,1);
+  }
+  return nnf;
+}
+
 PYBIND11_MODULE(patchmatch, m) {
-    m.def("convolution", &convolution, "convolve two NumPy arrays");
+    m.def("nnf_approx", &nnf_approx, "nnf_approx");
 }
 /*
 c++ -O3 -Wall -shared -std=c++11 -fPIC `python3 -m pybind11 --includes` patchmatch.cpp -o patchmatch`python3-config --extension-suffix`
