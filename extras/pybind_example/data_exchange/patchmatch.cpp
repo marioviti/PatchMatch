@@ -145,7 +145,7 @@ void iteration(py::array_t<double> A, py::array_t<double> B,
       for (int i = inc_left_h; i < exc_right_h; i+=1) {
         for (int j = inc_left_w; j < exc_right_w; j+=1) {
           propagation(i,j,A,B,nnf,patch_size,-step);
-          //random_search(i,j,A,B,nnf,patch_size);
+          random_search(i,j,A,B,nnf,patch_size);
         }
       }
     }
@@ -156,7 +156,7 @@ void iteration(py::array_t<double> A, py::array_t<double> B,
       for (int i = inc_left_h; i > exc_right_h; i-=1) {
         for (int j = inc_left_w; j > exc_right_w; j-=1) {
           propagation(i,j,A,B,nnf,patch_size,step);
-          //random_search(i,j,A,B,nnf,patch_size);
+          random_search(i,j,A,B,nnf,patch_size);
         }
       }
     }
