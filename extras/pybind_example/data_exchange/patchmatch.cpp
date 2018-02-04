@@ -162,6 +162,74 @@ void iteration(py::array_t<double> A, py::array_t<double> B,
     }
 }
 
+void put_val(py::array_t<double> a, double val) {
+  auto pa = a.mutable_unchecked<3>();
+  auto bufa = a.request();
+  for (size_t idx = 0; idx < bufa.shape[0]; idx++)
+    for (size_t idy = 0; idy < bufa.shape[1]; idy++)
+      for (size_t idz = 0; idz < bufa.shape[2]; idz++)
+        pa(idx,idy,idz) = val;
+}
+
+py::array_t<double> reconstruction( py::array_t<double> A,
+                                    py::array_t<double> B,
+                                    py::array_t<double> nnf,
+                                    int patch_size )
+{
+    // allocate buffer for reconstruction
+    auto bufA = A.request(), bufB = B.request(), bufnnf = nnf.request();
+    auto reconsturcted = py::array_t<double>(bufA.shape);
+    auto weights = py::array_t<double>(bufA.shape);
+
+    // pointers
+    auto prec = reconsturcted.mutable_unchecked<3>();
+    auto pnnf = nnf.mutable_unchecked<3>();
+    auto pweights = weights.mutable_unchecked<3>();
+    auto pB = B.mutable_unchecked<3>();
+
+    // dimensions
+    int nnf_h = bufnnf.shape[0], nnf_w = bufnnf.shape[1];
+    int A_h = bufA.shape[0], A_w = bufA.shape[1];
+    int B_h = bufB.shape[0], B_w = bufB.shape[1];
+    int channels = bufB.shape[2];
+
+    int i1,j1,nnf_i1, nnf_j1;
+    float nnf_i, nnf_j;
+
+    put_val(reconsturcted,0.0);
+    put_val(weights,1.0);
+
+    int half_patch_size = static_cast <int> (floor(patch_size/2.0));
+    for (int i = half_patch_size + 1; i < nnf_h; i++)
+      for (int j =half_patch_size + 1; j < nnf_w; j++) {
+        nnf_i = pnnf(i,j,0);
+        nnf_j = pnnf(i,j,1);
+        for (int k = -half_patch_size; k<1; k++)
+          for (int l = -half_patch_size; l<1; l++) {
+            i1 = i+k, j1 = j+l;
+            nnf_i1 = static_cast <int> (nnf_i) + l;
+            nnf_j1 = static_cast <int> (nnf_j) + k;
+            if (is_clamped( B_h,B_w,
+                            nnf_i1, nnf_i1+patch_size,
+                            nnf_j1, nnf_j1+patch_size )) {
+              // copy patch and increment weights
+              for (size_t idx = 0; idx < patch_size; idx++)
+                for (size_t idy = 0; idy < patch_size; idy++)
+                  for (size_t idz = 0; idz < channels; idz++) {
+                    prec(i1+idx,j1+idy,idz) += pB(nnf_i1+idx,nnf_j1+idy,idz);
+                    pweights(i1+idx,j1+idy,idz) += 1.0;
+                  }
+            }
+          }
+      }
+      for (size_t idx = 0; idx < A_h; idx++)
+        for (size_t idy = 0; idy < A_w; idy++)
+          for (size_t idz = 0; idz < channels; idz++)
+            prec(idx,idy,idz) /= pweights(idx,idy,idz);
+      return reconsturcted;
+}
+
+
 py::array_t<double> nnf_approx(py::array_t<double> A, py::array_t<double> B,
                 py::array_t<double> nnf,
                 int patch_size, int iterations) {
@@ -170,7 +238,7 @@ py::array_t<double> nnf_approx(py::array_t<double> A, py::array_t<double> B,
     std::cout << "iteration: " << i+1 <<'\n';
     iteration(A,B,nnf,patch_size,(i+1)%2==0,1);
   }
-  return nnf;
+  return reconstruction(A,B,nnf,patch_size);
 }
 
 PYBIND11_MODULE(patchmatch, m) {

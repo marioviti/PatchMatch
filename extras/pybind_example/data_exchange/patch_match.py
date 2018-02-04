@@ -61,9 +61,11 @@ def main():
     ps = 5
     nnf = initialization(A,B,ssd,ps)
     print('in')
-    nnf1 = nnf_approx(A,B,nnf,ps,5)
+    #nnf1 = nnf_approx(A,B,nnf,ps,5)
     print('out')
-    rec2 = reconstruction(A,B,nnf1,ps)
+    #rec2 = reconstruction(A,B,nnf1,ps)
+    rec2 = nnf_approx(A,B,nnf,ps,5)
+    print(np.unique(rec2))
     plt.imshow(rec2)
     plt.show()
 
