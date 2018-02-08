@@ -41,6 +41,7 @@ def initialization(A,B,distance_function,patch_size):
     h_nnf = h-patch_size//2*2
     w_nnf = w-patch_size//2*2
     nnf = np.zeros((h_nnf,w_nnf,3))
+    """
     for i in range(h_nnf):
         for j in range(w_nnf):
             # initialize with random values and calculate distance
@@ -50,6 +51,7 @@ def initialization(A,B,distance_function,patch_size):
             nnf[i,j,1] = float(nnf_j)
             nnf[i,j,2] = distance_function( A[i:i+patch_size, j:j+patch_size],
                             B[nnf_i:nnf_i+patch_size, nnf_j:nnf_j+patch_size])
+"""
     return nnf
 
 def main():
@@ -65,8 +67,9 @@ def main():
     print('out')
     #rec2 = reconstruction(A,B,nnf1,ps)
     rec2 = nnf_approx(A,B,nnf,ps,5)
-    print(np.unique(rec2))
     plt.imshow(rec2)
+    plt.show()
+    plt.imshow(nnf)
     plt.show()
 
 if __name__ == '__main__':

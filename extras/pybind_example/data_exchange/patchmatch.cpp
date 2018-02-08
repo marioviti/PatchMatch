@@ -38,6 +38,28 @@ float ssd(py::array_t<double> A, py::array_t<double> B,
 }
 
 
+void initialization( py::array_t<double> A,
+                     py::array_t<double> B,
+                     py::array_t<double> nnf,
+                     int patch_size) {
+  auto bufnnf = nnf.request();
+  auto pnnf = nnf.mutable_unchecked<3>();
+  int nnf_h = bufnnf.shape[0], nnf_w = bufnnf.shape[1];
+  int nnf_i,nnf_j;
+  double ri,rj;
+  for (size_t i=0; i<nnf_h; i++)
+    for (size_t j=0; j<nnf_w; j++) {
+      ri = (static_cast <float> (rand()) / static_cast <float> (RAND_MAX));
+      rj = (static_cast <float> (rand()) / static_cast <float> (RAND_MAX));
+      nnf_i = static_cast <int> (floor(ri*nnf_h));
+      nnf_j = static_cast <int> (floor(rj*nnf_w));
+      pnnf(i,j,0) = static_cast <double> (nnf_i);
+      pnnf(i,j,1) = static_cast <double> (nnf_j);
+      pnnf(i,j,2) = ssd(A,B,i,j,nnf_i,nnf_j,patch_size);
+    }
+}
+
+
 void propagation(int i, int j, py::array_t<double> A, py::array_t<double> B,
                   py::array_t<double> nnf, int patch_size, int prop_step) {
     auto bufnnf = nnf.request();
@@ -136,6 +158,7 @@ void random_search(int i, int j,
 void iteration(py::array_t<double> A, py::array_t<double> B,
                py::array_t<double> nnf,
                int patch_size, bool even, int step ) {
+    //initialization(A,B,nnf,patch_size);
     auto bufnnf = nnf.request();
     int nnf_h = bufnnf.shape[0], nnf_w = bufnnf.shape[1];
     if (even){
@@ -230,10 +253,12 @@ py::array_t<double> reconstruction( py::array_t<double> A,
 }
 
 
-py::array_t<double> nnf_approx(py::array_t<double> A, py::array_t<double> B,
-                py::array_t<double> nnf,
-                int patch_size, int iterations) {
+py::array_t<double> nnf_approx( py::array_t<double> A,
+                                py::array_t<double> B,
+                                py::array_t<double> nnf,
+                                int patch_size, int iterations) {
   std::srand(std::time(nullptr));
+  initialization(A,B,nnf,patch_size);
   for (int i=0; i<iterations; i++) {
     std::cout << "iteration: " << i+1 <<'\n';
     iteration(A,B,nnf,patch_size,(i+1)%2==0,1);
